@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const auth = require('../middleware/auth')
 
 //REGISTER  A NEW USER ROUTE
 router.post('/register', async(req, res)=>{
@@ -88,4 +89,28 @@ router.post('/login', async (req, res)=>{
         res.status(500).send('Server error');
     }
 });
+
+router.get ('/', auth, async(req, res)=>
+{
+    try
+    {
+        const userId = req.user.id;
+
+        const user = await pool.query(
+            'SELECT id, email, created_at, google_id FROM users WHERE id = $1',[userId]);
+
+        if (user.rows.length === 0) 
+        {
+            return res.status(404).json({ msg: 'User not found. Please create an account first.' });
+        }
+
+        res.json(user.rows[0]);
+    }
+    catch (err)
+    {
+        console.log(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
 module.exports = router;
