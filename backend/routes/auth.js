@@ -3,7 +3,8 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const auth = require('../middleware/auth')
+const auth = require('../middleware/auth');
+const loginLimiter = require('../middleware/loginLimiter');
 
 //REGISTER  A NEW USER ROUTE
 router.post('/register', async(req, res)=>{
@@ -40,7 +41,7 @@ router.post('/register', async(req, res)=>{
 });
 
 //LOGIN ROUTE
-router.post('/login', async (req, res)=>{
+router.post('/login', loginLimiter, async (req, res)=>{
     const { email, password } = req.body;
 
     if (!email || !password)
