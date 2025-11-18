@@ -5,6 +5,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const auth = require('../middleware/auth');
 const loginLimiter = require('../middleware/loginLimiter');
+const { OAuth2Client } = require('google-auth-library');
+
+const client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'http://localhost:5000/api/auth/google/callback' // MUST match what you put in Google Console
+);
 
 //REGISTER  A NEW USER ROUTE
 router.post('/register', async(req, res)=>{
@@ -112,6 +119,79 @@ router.get ('/', auth, async(req, res)=>
         console.log(err.message);
         res.status(500).send('Server Error');
     }
+});
+
+//login with google
+router.post('/google', async (req, res) => {
+  const { code } = req.body;
+
+  try {
+    //exchange the 'code' for tokens (access_token, id_token)
+    const { tokens } = await client.getToken(code);
+    
+    //verify the ID token to get the user's profile
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    
+    const payload = ticket.getPayload();
+    // These are the fields Google gives us:
+    const googleId = payload.sub; // 'sub' is the unique Google ID
+    const email = payload.email;
+
+    // check if user exists in our DB
+    // We check BOTH email OR google_id to prevent duplicates
+    const userCheck = await pool.query(
+      'SELECT * FROM users WHERE google_id = $1 OR email = $2',
+      [googleId, email]
+    );
+
+    let user;
+
+    if (userCheck.rows.length > 0) {
+      //user exists
+      user = userCheck.rows[0];
+
+      //if they signed up with password before, link their Google ID now
+      if (!user.google_id) {
+        const updateUser = await pool.query(
+          'UPDATE users SET google_id = $1 WHERE id = $2 RETURNING *',
+          [googleId, user.id]
+        );
+        user = updateUser.rows[0];
+      }
+    } else {
+      //new user
+      //create them (Password is NULL)
+      const newUser = await pool.query(
+        'INSERT INTO users (email, google_id) VALUES ($1, $2) RETURNING *',
+        [email, googleId]
+      );
+      user = newUser.rows[0];
+    }
+
+    //generate OUR JWT (Just like normal login)
+    const payloadJwt = {
+      user: {
+        id: user.id,
+      },
+    };
+
+    jwt.sign(
+      payloadJwt,
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' },
+      (err, token) => {
+        if (err) throw err;
+        res.json({ token }); //send back our token
+      }
+    );
+
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Google Login Error');
+  }
 });
 
 module.exports = router;
